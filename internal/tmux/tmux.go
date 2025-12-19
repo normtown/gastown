@@ -110,10 +110,22 @@ func (t *Tmux) ListSessions() ([]string, error) {
 
 // SendKeys sends keystrokes to a session and presses Enter.
 // Always sends Enter as a separate command for reliability.
+// Uses a debounce delay between paste and Enter to ensure paste completes.
 func (t *Tmux) SendKeys(session, keys string) error {
+	return t.SendKeysDebounced(session, keys, 100) // 100ms default debounce
+}
+
+// SendKeysDebounced sends keystrokes with a configurable delay before Enter.
+// The debounceMs parameter controls how long to wait after paste before sending Enter.
+// This prevents race conditions where Enter arrives before paste is processed.
+func (t *Tmux) SendKeysDebounced(session, keys string, debounceMs int) error {
 	// Send text using literal mode (-l) to handle special chars
 	if _, err := t.run("send-keys", "-t", session, "-l", keys); err != nil {
 		return err
+	}
+	// Wait for paste to be processed
+	if debounceMs > 0 {
+		time.Sleep(time.Duration(debounceMs) * time.Millisecond)
 	}
 	// Send Enter separately - more reliable than appending to send-keys
 	_, err := t.run("send-keys", "-t", session, "Enter")

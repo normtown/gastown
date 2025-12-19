@@ -228,6 +228,7 @@ func (m *Manager) Capture(polecat string, lines int) (string, error) {
 }
 
 // Inject sends a message to a polecat session.
+// Uses a longer debounce delay for large messages to ensure paste completes.
 func (m *Manager) Inject(polecat, message string) error {
 	sessionID := m.sessionName(polecat)
 
@@ -239,7 +240,14 @@ func (m *Manager) Inject(polecat, message string) error {
 		return ErrSessionNotFound
 	}
 
-	return m.tmux.SendKeys(sessionID, message)
+	// Use longer debounce for large messages (spawn context can be 1KB+)
+	// Scale delay based on message size: 100ms base + 50ms per KB
+	debounceMs := 100 + (len(message)/1024)*50
+	if debounceMs > 500 {
+		debounceMs = 500 // Cap at 500ms
+	}
+
+	return m.tmux.SendKeysDebounced(sessionID, message, debounceMs)
 }
 
 // StopAll terminates all sessions for this rig.
