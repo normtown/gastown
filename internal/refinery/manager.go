@@ -551,13 +551,13 @@ Thank you for your contribution!`,
 	router.Send(msg)
 }
 
-// ErrMRNotFound is returned when a merge request is not found.
-var ErrMRNotFound = errors.New("merge request not found")
+// Common errors for MR operations
+var (
+	ErrMRNotFound  = errors.New("merge request not found")
+	ErrMRNotFailed = errors.New("merge request has not failed")
+)
 
-// ErrMRNotFailed is returned when trying to retry an MR that hasn't failed.
-var ErrMRNotFailed = errors.New("merge request has not failed")
-
-// GetMR returns a merge request by ID.
+// GetMR returns a merge request by ID from the state.
 func (m *Manager) GetMR(id string) (*MergeRequest, error) {
 	ref, err := m.loadState()
 	if err != nil {
@@ -573,6 +573,34 @@ func (m *Manager) GetMR(id string) (*MergeRequest, error) {
 	if ref.PendingMRs != nil {
 		if mr, ok := ref.PendingMRs[id]; ok {
 			return mr, nil
+		}
+	}
+
+	return nil, ErrMRNotFound
+}
+
+// FindMR finds a merge request by ID or branch name in the queue.
+func (m *Manager) FindMR(idOrBranch string) (*MergeRequest, error) {
+	queue, err := m.Queue()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, item := range queue {
+		// Match by ID
+		if item.MR.ID == idOrBranch {
+			return item.MR, nil
+		}
+		// Match by branch name (with or without polecat/ prefix)
+		if item.MR.Branch == idOrBranch {
+			return item.MR, nil
+		}
+		if "polecat/"+idOrBranch == item.MR.Branch {
+			return item.MR, nil
+		}
+		// Match by worker name (partial match for convenience)
+		if strings.Contains(item.MR.ID, idOrBranch) {
+			return item.MR, nil
 		}
 	}
 
@@ -633,6 +661,54 @@ func (m *Manager) RegisterMR(mr *MergeRequest) error {
 
 	ref.PendingMRs[mr.ID] = mr
 	return m.saveState(ref)
+}
+
+// RejectMR manually rejects a merge request.
+// It closes the MR with rejected status and optionally notifies the worker.
+// Returns the rejected MR for display purposes.
+func (m *Manager) RejectMR(idOrBranch string, reason string, notify bool) (*MergeRequest, error) {
+	mr, err := m.FindMR(idOrBranch)
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify MR is open or in_progress (can't reject already closed)
+	if mr.IsClosed() {
+		return nil, fmt.Errorf("%w: MR is already closed with reason: %s", ErrClosedImmutable, mr.CloseReason)
+	}
+
+	// Close with rejected reason
+	if err := mr.Close(CloseReasonRejected); err != nil {
+		return nil, fmt.Errorf("failed to close MR: %w", err)
+	}
+	mr.Error = reason
+
+	// Optionally notify worker
+	if notify {
+		m.notifyWorkerRejected(mr, reason)
+	}
+
+	return mr, nil
+}
+
+// notifyWorkerRejected sends a rejection notification to a polecat.
+func (m *Manager) notifyWorkerRejected(mr *MergeRequest, reason string) {
+	router := mail.NewRouter(m.workDir)
+	msg := &mail.Message{
+		From:    fmt.Sprintf("%s/refinery", m.rig.Name),
+		To:      fmt.Sprintf("%s/%s", m.rig.Name, mr.Worker),
+		Subject: "Merge request rejected",
+		Body: fmt.Sprintf(`Your merge request has been rejected.
+
+Branch: %s
+Issue: %s
+Reason: %s
+
+Please review the feedback and address the issues before resubmitting.`,
+			mr.Branch, mr.IssueID, reason),
+		Priority: mail.PriorityNormal,
+	}
+	router.Send(msg)
 }
 
 // findTownRoot walks up directories to find the town root.
