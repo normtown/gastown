@@ -19,6 +19,7 @@ import (
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/wisp"
 	"github.com/steveyegge/gastown/internal/witness"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -245,6 +246,12 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting polecat: %w", err)
 	}
 
+	// Get the polecat object to access its worktree path for hook file
+	polecatObj, err := polecatMgr.Get(polecatName)
+	if err != nil {
+		return fmt.Errorf("getting polecat after creation: %w", err)
+	}
+
 	// Beads operations use rig-level beads (at rig root, not mayor/rig)
 	beadsPath := r.Path
 
@@ -352,6 +359,21 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s Assigned %s to %s/%s\n",
 		style.Bold.Render("✓"),
 		assignmentID, rigName, polecatName)
+
+	// Write hook file to polecat's worktree so gt mol status can find it
+	// This puts work on the polecat's hook for the propulsion protocol
+	sw := wisp.NewSlungWork(assignmentID, "mayor/")
+	if moleculeCtx != nil {
+		sw.Subject = fmt.Sprintf("Molecule: %s", moleculeCtx.MoleculeID)
+		sw.Context = fmt.Sprintf("Step %d/%d of %s", moleculeCtx.StepNumber, moleculeCtx.TotalSteps, moleculeCtx.MoleculeID)
+	} else if issue != nil {
+		sw.Subject = issue.Title
+	}
+	if err := wisp.WriteSlungWork(polecatObj.ClonePath, polecatAddress, sw); err != nil {
+		fmt.Printf("%s creating hook file: %v\n", style.Dim.Render("Warning:"), err)
+	} else {
+		fmt.Printf("%s Hook file created in polecat worktree\n", style.Bold.Render("✓"))
+	}
 
 	// Sync beads to push assignment changes
 	if err := syncBeads(beadsPath, false); err != nil {
