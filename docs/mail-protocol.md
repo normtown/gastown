@@ -61,12 +61,72 @@ Verified: clean git state, issue closed
 ```
 Branch: <branch>
 Issue: <issue-id>
+Polecat: <polecat-name>
+Rig: <rig>
+Target: <target-branch>
 Merged-At: <timestamp>
+Merge-Commit: <sha>
 ```
 
 **Trigger**: Refinery sends after successful merge to main.
 
 **Handler**: Witness completes cleanup wisp, nukes polecat worktree.
+
+### MERGE_FAILED
+
+**Route**: Refinery → Witness
+
+**Purpose**: Notify that merge attempt failed (tests, build, or other non-conflict error).
+
+**Subject format**: `MERGE_FAILED <polecat-name>`
+
+**Body format**:
+```
+Branch: <branch>
+Issue: <issue-id>
+Polecat: <polecat-name>
+Rig: <rig>
+Target: <target-branch>
+Failed-At: <timestamp>
+Failure-Type: <tests|build|push|other>
+Error: <error-message>
+```
+
+**Trigger**: Refinery sends when merge fails for non-conflict reasons.
+
+**Handler**: Witness notifies polecat, assigns work back for rework.
+
+### REWORK_REQUEST
+
+**Route**: Refinery → Witness
+
+**Purpose**: Request polecat to rebase branch due to merge conflicts.
+
+**Subject format**: `REWORK_REQUEST <polecat-name>`
+
+**Body format**:
+```
+Branch: <branch>
+Issue: <issue-id>
+Polecat: <polecat-name>
+Rig: <rig>
+Target: <target-branch>
+Requested-At: <timestamp>
+Conflict-Files: <file1>, <file2>, ...
+
+Please rebase your changes onto <target-branch>:
+
+  git fetch origin
+  git rebase origin/<target-branch>
+  # Resolve any conflicts
+  git push -f
+
+The Refinery will retry the merge after rebase is complete.
+```
+
+**Trigger**: Refinery sends when merge has conflicts with target branch.
+
+**Handler**: Witness notifies polecat with rebase instructions.
 
 ### WITNESS_PING
 
@@ -184,13 +244,50 @@ Polecat                    Witness                    Refinery
    │                          │ MERGE_READY              │
    │                          │─────────────────────────>│
    │                          │                          │
-   │                          │                    (merge to main)
+   │                          │                    (merge attempt)
    │                          │                          │
-   │                          │ MERGED                   │
+   │                          │ MERGED (success)         │
    │                          │<─────────────────────────│
    │                          │                          │
    │                    (nuke polecat)                   │
    │                          │                          │
+```
+
+### Merge Failure Flow
+
+```
+                           Witness                    Refinery
+                              │                          │
+                              │                    (merge fails)
+                              │                          │
+                              │ MERGE_FAILED             │
+   ┌──────────────────────────│<─────────────────────────│
+   │                          │                          │
+   │ (failure notification)   │                          │
+   │<─────────────────────────│                          │
+   │                          │                          │
+Polecat (rework needed)
+```
+
+### Rebase Required Flow
+
+```
+                           Witness                    Refinery
+                              │                          │
+                              │                    (conflict detected)
+                              │                          │
+                              │ REWORK_REQUEST           │
+   ┌──────────────────────────│<─────────────────────────│
+   │                          │                          │
+   │ (rebase instructions)    │                          │
+   │<─────────────────────────│                          │
+   │                          │                          │
+Polecat                       │                          │
+   │                          │                          │
+   │ (rebases, gt done)       │                          │
+   │─────────────────────────>│ MERGE_READY              │
+   │                          │─────────────────────────>│
+   │                          │                    (retry merge)
 ```
 
 ### Second-Order Monitoring
@@ -261,3 +358,4 @@ flexible enough for human debugging.
 - `docs/agent-as-bead.md` - Agent identity and slots
 - `.beads/formulas/mol-witness-patrol.formula.toml` - Witness handling
 - `internal/mail/` - Mail routing implementation
+- `internal/protocol/` - Protocol handlers for Witness-Refinery communication
