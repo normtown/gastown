@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // Common errors
@@ -84,9 +85,17 @@ func (m *Manager) assigneeID(name string) string {
 }
 
 // agentBeadID returns the agent bead ID for a polecat.
-// Format: "gt-<rig>-polecat-<name>" (e.g., "gt-gastown-polecat-Toast")
+// Format: "<prefix>-<rig>-polecat-<name>" (e.g., "gt-gastown-polecat-Toast", "bd-beads-polecat-obsidian")
+// The prefix is looked up from routes.jsonl to support rigs with custom prefixes.
 func (m *Manager) agentBeadID(name string) string {
-	return beads.PolecatBeadID(m.rig.Name, name)
+	// Find town root to lookup prefix from routes.jsonl
+	townRoot, err := workspace.Find(m.rig.Path)
+	if err != nil || townRoot == "" {
+		// Fall back to default prefix
+		return beads.PolecatBeadID(m.rig.Name, name)
+	}
+	prefix := beads.GetPrefixForRig(townRoot, m.rig.Name)
+	return beads.PolecatBeadIDWithPrefix(prefix, m.rig.Name, name)
 }
 
 // getCleanupStatusFromBead reads the cleanup_status from the polecat's agent bead.

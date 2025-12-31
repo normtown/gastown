@@ -1171,8 +1171,17 @@ func getAgentFields(ctx RoleContext, state string) *beads.AgentFields {
 
 // getAgentBeadID returns the agent bead ID for the current role.
 // Uses canonical naming: prefix-rig-role-name
+// The prefix is looked up from routes.jsonl to support rigs with custom prefixes.
 // Returns empty string for unknown roles.
 func getAgentBeadID(ctx RoleContext) string {
+	// Helper to get prefix for rig-level agents
+	getPrefix := func() string {
+		if ctx.TownRoot != "" && ctx.Rig != "" {
+			return beads.GetPrefixForRig(ctx.TownRoot, ctx.Rig)
+		}
+		return "gt" // Default prefix
+	}
+
 	switch ctx.Role {
 	case RoleMayor:
 		return beads.MayorBeadID()
@@ -1180,22 +1189,22 @@ func getAgentBeadID(ctx RoleContext) string {
 		return beads.DeaconBeadID()
 	case RoleWitness:
 		if ctx.Rig != "" {
-			return beads.WitnessBeadID(ctx.Rig)
+			return beads.WitnessBeadIDWithPrefix(getPrefix(), ctx.Rig)
 		}
 		return ""
 	case RoleRefinery:
 		if ctx.Rig != "" {
-			return beads.RefineryBeadID(ctx.Rig)
+			return beads.RefineryBeadIDWithPrefix(getPrefix(), ctx.Rig)
 		}
 		return ""
 	case RolePolecat:
 		if ctx.Rig != "" && ctx.Polecat != "" {
-			return beads.PolecatBeadID(ctx.Rig, ctx.Polecat)
+			return beads.PolecatBeadIDWithPrefix(getPrefix(), ctx.Rig, ctx.Polecat)
 		}
 		return ""
 	case RoleCrew:
 		if ctx.Rig != "" && ctx.Polecat != "" {
-			return beads.CrewBeadID(ctx.Rig, ctx.Polecat)
+			return beads.CrewBeadIDWithPrefix(getPrefix(), ctx.Rig, ctx.Polecat)
 		}
 		return ""
 	default:
