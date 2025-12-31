@@ -305,7 +305,7 @@ func renderConvoyLine(c Convoy, landed bool) string {
 
 	if landed {
 		// Show checkmark and time since landing
-		age := formatConvoyAge(time.Since(c.ClosedAt))
+		age := formatAge(time.Since(c.ClosedAt))
 		status := ConvoyLandedStyle.Render("✓") + " " + ConvoyAgeStyle.Render(age+" ago")
 		return fmt.Sprintf("  %s  %-20s  %s", id, title, status)
 	}
@@ -337,16 +337,3 @@ func renderProgressBar(completed, total int) string {
 	return ConvoyProgressStyle.Render(bar)
 }
 
-// formatConvoyAge formats duration for convoy display
-func formatConvoyAge(d time.Duration) string {
-	if d < time.Minute {
-		return "just now"
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	}
-	if d < 24*time.Hour {
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	}
-	return fmt.Sprintf("%dd", int(d.Hours()/24))
-}

@@ -344,7 +344,7 @@ func (m *Model) renderShortHelp() string {
 // formatAge formats a duration as a short age string
 func formatAge(d time.Duration) string {
 	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
+		return "just now"
 	}
 	if d < time.Hour {
 		return fmt.Sprintf("%dm", int(d.Minutes()))
