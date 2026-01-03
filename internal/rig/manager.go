@@ -451,9 +451,21 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 		return err
 	}
 
-	// Run bd init if available, with --no-agents to skip AGENTS.md creation
-	cmd := exec.Command("bd", "init", "--prefix", prefix, "--no-agents")
+	// Build environment with explicit BEADS_DIR to prevent bd from
+	// finding a parent directory's .beads/ database
+	env := os.Environ()
+	filteredEnv := make([]string, 0, len(env)+1)
+	for _, e := range env {
+		if !strings.HasPrefix(e, "BEADS_DIR=") {
+			filteredEnv = append(filteredEnv, e)
+		}
+	}
+	filteredEnv = append(filteredEnv, "BEADS_DIR="+beadsDir)
+
+	// Run bd init if available
+	cmd := exec.Command("bd", "init", "--prefix", prefix)
 	cmd.Dir = rigPath
+	cmd.Env = filteredEnv
 	_, err := cmd.CombinedOutput()
 	if err != nil {
 		// bd might not be installed or failed, create minimal structure
@@ -470,6 +482,7 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 	// Without fingerprint, the bd daemon fails to start silently.
 	migrateCmd := exec.Command("bd", "migrate", "--update-repo-id")
 	migrateCmd.Dir = rigPath
+	migrateCmd.Env = filteredEnv
 	// Ignore errors - fingerprint is optional for functionality
 	_, _ = migrateCmd.CombinedOutput()
 
@@ -477,33 +490,19 @@ func (m *Manager) initBeads(rigPath, prefix string) error {
 }
 
 // initAgentBeads creates agent beads for this rig and optionally global agents.
-// - Always creates: <prefix>-witness-<rig>, <prefix>-refinery-<rig>
-// - First rig only: <prefix>-deacon, <prefix>-mayor
+// - Always creates: gt-<rig>-witness, gt-<rig>-refinery
+// - First rig only: gt-deacon, gt-mayor
+//
+// Agent beads are stored in the TOWN beads (not rig beads) because they use
+// the canonical gt-* prefix for cross-rig coordination. The town beads must
+// be initialized with 'gt' prefix for this to work.
 //
 // Agent beads track lifecycle state for ZFC compliance (gt-h3hak, gt-pinkq).
 func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig bool) error {
-	// Run bd commands from the canonical beads location.
-	// - If source repo has .beads/ tracked (mayor/rig/.beads exists), use that
-	// - Otherwise use rig root .beads/ (created by initBeads during rig add)
-	mayorRigBeads := filepath.Join(rigPath, "mayor", "rig", ".beads")
-	var beadsDir string
-	if _, err := os.Stat(mayorRigBeads); err == nil {
-		beadsDir = mayorRigBeads
-	} else {
-		beadsDir = filepath.Join(rigPath, ".beads")
-	}
-	prevBeadsDir, hadBeadsDir := os.LookupEnv("BEADS_DIR")
-	if err := os.Setenv("BEADS_DIR", beadsDir); err != nil {
-		return fmt.Errorf("setting BEADS_DIR: %w", err)
-	}
-	defer func() {
-		if hadBeadsDir {
-			_ = os.Setenv("BEADS_DIR", prevBeadsDir)
-		} else {
-			_ = os.Unsetenv("BEADS_DIR")
-		}
-	}()
-	bd := beads.New(rigPath)
+	// Agent beads go in town beads (gt-* prefix), not rig beads.
+	// This enables cross-rig agent coordination via canonical IDs.
+	townBeadsDir := filepath.Join(m.townRoot, ".beads")
+	bd := beads.NewWithBeadsDir(m.townRoot, townBeadsDir)
 
 	// Define agents to create
 	type agentDef struct {
@@ -515,16 +514,18 @@ func (m *Manager) initAgentBeads(rigPath, rigName, prefix string, isFirstRig boo
 
 	var agents []agentDef
 
-	// Always create rig-specific agents (using canonical naming: prefix-rig-role-name)
+	// Always create rig-specific agents using canonical gt- prefix.
+	// Agent bead IDs use the gastown namespace (gt-) regardless of the rig's
+	// beads prefix. Format: gt-<rig>-<role> (e.g., gt-tribal-witness)
 	agents = append(agents,
 		agentDef{
-			id:       beads.WitnessBeadIDWithPrefix(prefix, rigName),
+			id:       beads.WitnessBeadID(rigName),
 			roleType: "witness",
 			rig:      rigName,
 			desc:     fmt.Sprintf("Witness for %s - monitors polecat health and progress.", rigName),
 		},
 		agentDef{
-			id:       beads.RefineryBeadIDWithPrefix(prefix, rigName),
+			id:       beads.RefineryBeadID(rigName),
 			roleType: "refinery",
 			rig:      rigName,
 			desc:     fmt.Sprintf("Refinery for %s - processes merge queue.", rigName),
