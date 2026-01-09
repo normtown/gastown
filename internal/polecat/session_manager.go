@@ -183,23 +183,70 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	if command == "" {
 		command = config.BuildPolecatStartupCommand(m.rig.Name, polecat, m.rig.Path, "")
 	}
-	// Wait for shell to be ready before sending keys (prevents "can't find pane" under load)
-	if err := m.tmux.WaitForShellReady(sessionID, 5*time.Second); err != nil {
-		_ = m.tmux.KillSession(sessionID)
-		return fmt.Errorf("waiting for shell: %w", err)
-	}
-	if err := m.tmux.SendKeys(sessionID, command); err != nil {
-		return fmt.Errorf("sending command: %w", err)
+
+	// Attempt to start Claude with retry logic
+	const maxRetries = 3
+	var claudeStarted bool
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Wait for shell to be ready before sending keys (prevents "can't find pane" under load)
+		if err := m.tmux.WaitForShellReady(sessionID, 5*time.Second); err != nil {
+			if attempt == maxRetries {
+				_ = m.tmux.KillSession(sessionID)
+				return fmt.Errorf("waiting for shell after %d attempts: %w", maxRetries, err)
+			}
+			debugSession(fmt.Sprintf("WaitForShellReady attempt %d", attempt), err)
+			time.Sleep(time.Duration(attempt) * time.Second)
+			continue
+		}
+
+		if err := m.tmux.SendKeys(sessionID, command); err != nil {
+			return fmt.Errorf("sending command: %w", err)
+		}
+
+		// Wait for Claude to actually start (verified by process check)
+		if err := m.tmux.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
+			debugSession(fmt.Sprintf("WaitForCommand attempt %d", attempt), err)
+			if attempt < maxRetries {
+				// Send Ctrl-C to abort any partial command, then retry
+				_ = m.tmux.SendKeysRaw(sessionID, "C-c")
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
+		}
+
+		// Verify Claude is actually running (pane command should be "node")
+		if m.tmux.IsClaudeRunning(sessionID) {
+			claudeStarted = true
+			break
+		}
+
+		debugSession(fmt.Sprintf("Claude not running after attempt %d", attempt), nil)
+		if attempt < maxRetries {
+			// Send Ctrl-C and retry
+			_ = m.tmux.SendKeysRaw(sessionID, "C-c")
+			time.Sleep(500 * time.Millisecond)
+		}
 	}
 
-	// Wait for Claude to start (non-fatal)
-	debugSession("WaitForCommand", m.tmux.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout))
+	if !claudeStarted {
+		_ = m.tmux.KillSession(sessionID)
+		return fmt.Errorf("failed to start Claude after %d attempts", maxRetries)
+	}
 
 	// Accept bypass permissions warning dialog if it appears
 	debugSession("AcceptBypassPermissionsWarning", m.tmux.AcceptBypassPermissionsWarning(sessionID))
 
-	// Wait for Claude to be fully ready
-	time.Sleep(8 * time.Second)
+	// Wait for Claude's prompt to be ready (more reliable than just process check)
+	if err := m.tmux.WaitForClaudeReady(sessionID, 30*time.Second); err != nil {
+		debugSession("WaitForClaudeReady", err)
+		// Non-fatal: Claude is running but prompt detection may have failed
+	}
+
+	// Guard: Only send nudges if Claude is still running
+	if !m.tmux.IsClaudeRunning(sessionID) {
+		_ = m.tmux.KillSession(sessionID)
+		return fmt.Errorf("Claude exited unexpectedly before nudges could be sent")
+	}
 
 	// Inject startup nudge for predecessor discovery via /resume
 	address := fmt.Sprintf("%s/polecats/%s", m.rig.Name, polecat)
@@ -211,8 +258,13 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	}))
 
 	// GUPP: Send propulsion nudge to trigger autonomous work execution
-	time.Sleep(2 * time.Second)
-	debugSession("NudgeSession PropulsionNudge", m.tmux.NudgeSession(sessionID, session.PropulsionNudge()))
+	// Guard: verify Claude is still running before sending
+	if m.tmux.IsClaudeRunning(sessionID) {
+		time.Sleep(2 * time.Second)
+		debugSession("NudgeSession PropulsionNudge", m.tmux.NudgeSession(sessionID, session.PropulsionNudge()))
+	} else {
+		debugSession("Skipping PropulsionNudge", fmt.Errorf("Claude no longer running"))
+	}
 
 	return nil
 }
