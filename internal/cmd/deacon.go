@@ -112,7 +112,7 @@ var deaconTriggerPendingCmd = &cobra.Command{
 
 ⚠️  BOOTSTRAP MODE ONLY - Uses regex detection (ZFC violation acceptable).
 
-This command uses WaitForClaudeReady (regex) to detect when Claude is ready.
+This command uses WaitForAgentReady (regex) to detect when the agent is ready.
 This is appropriate for daemon bootstrap when no AI is available.
 
 In steady-state, the Deacon should use AI-based observation instead:

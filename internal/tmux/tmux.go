@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 	"time"
 
@@ -556,24 +555,15 @@ func (t *Tmux) IsAgentRunning(session string, expectedPaneCommands ...string) bo
 }
 
 // IsClaudeRunning checks if Claude appears to be running in the session.
-// Only trusts the pane command - UI markers in scrollback cause false positives.
-// Claude can report as "node", "claude", or a version number like "2.0.76".
+// Deprecated: Use IsAgentRunning() instead for agent-agnostic detection.
+// This wrapper now uses the robust non-shell fallback detection.
 func (t *Tmux) IsClaudeRunning(session string) bool {
-	// Check for known command names first
-	if t.IsAgentRunning(session, "node", "claude") {
-		return true
-	}
-	// Check for version pattern (e.g., "2.0.76") - Claude Code shows version as pane command
-	cmd, err := t.GetPaneCommand(session)
-	if err != nil {
-		return false
-	}
-	matched, _ := regexp.MatchString(`^\d+\.\d+\.\d+`, cmd)
-	return matched
+	// Use non-shell detection (any non-shell process = agent running)
+	return t.IsAgentRunning(session)
 }
 
 // WaitForCommand polls until the pane is NOT running one of the excluded commands.
-// Useful for waiting until a shell has started a new process (e.g., claude).
+// Useful for waiting until a shell has started a new process (e.g., an agent).
 // Returns nil when a non-excluded command is detected, or error on timeout.
 func (t *Tmux) WaitForCommand(session string, excludeCommands []string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
@@ -620,13 +610,13 @@ func (t *Tmux) WaitForShellReady(session string, timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for shell")
 }
 
-// WaitForClaudeReady polls until Claude's prompt indicator appears in the pane.
-// Claude is ready when we see "> " at the start of a line (the input prompt).
-// This is more reliable than just checking if node is running.
+// WaitForAgentReady polls until an agent's prompt indicator appears in the pane.
+// The agent is ready when we see "> " at the start of a line (the input prompt).
+// This is more reliable than just checking if the process is running.
 //
 // IMPORTANT: Bootstrap vs Steady-State Observation
 //
-// This function uses regex to detect Claude's prompt - a ZFC violation.
+// This function uses regex to detect the agent's prompt - a ZFC violation.
 // ZFC (Zero False Commands) principle: AI should observe AI, not regex.
 //
 // Bootstrap (acceptable):
@@ -643,7 +633,7 @@ func (t *Tmux) WaitForShellReady(session string, timeout time.Duration) error {
 //
 // See: gt deacon pending (ZFC-compliant AI observation)
 // See: gt deacon trigger-pending (bootstrap mode, regex-based)
-func (t *Tmux) WaitForClaudeReady(session string, timeout time.Duration) error {
+func (t *Tmux) WaitForAgentReady(session string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		// Capture last few lines of the pane
@@ -652,7 +642,7 @@ func (t *Tmux) WaitForClaudeReady(session string, timeout time.Duration) error {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
-		// Look for Claude's prompt indicator "> " at start of line
+		// Look for agent's prompt indicator "> " at start of line
 		for _, line := range lines {
 			trimmed := strings.TrimSpace(line)
 			if strings.HasPrefix(trimmed, "> ") || trimmed == ">" {
@@ -661,7 +651,13 @@ func (t *Tmux) WaitForClaudeReady(session string, timeout time.Duration) error {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("timeout waiting for Claude prompt")
+	return fmt.Errorf("timeout waiting for agent prompt")
+}
+
+// WaitForClaudeReady polls until an agent's prompt indicator appears.
+// Deprecated: Use WaitForAgentReady() instead for agent-agnostic detection.
+func (t *Tmux) WaitForClaudeReady(session string, timeout time.Duration) error {
+	return t.WaitForAgentReady(session, timeout)
 }
 
 // GetSessionInfo returns detailed information about a session.

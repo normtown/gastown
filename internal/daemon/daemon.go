@@ -188,7 +188,7 @@ func (d *Daemon) heartbeat(state *State) {
 
 	// 6. Trigger pending polecat spawns (bootstrap mode - ZFC violation acceptable)
 	// This ensures polecats get nudged even when Deacon isn't in a patrol cycle.
-	// Uses regex-based WaitForClaudeReady, which is acceptable for daemon bootstrap.
+	// Uses regex-based WaitForAgentReady, which is acceptable for daemon bootstrap.
 	d.triggerPendingSpawns()
 
 	// 7. Process lifecycle requests
@@ -378,8 +378,8 @@ func (d *Daemon) ensureWitnessRunning(rigName string) {
 	}
 
 	// Manager.Start() handles: zombie detection, session creation, env vars, theming,
-	// WaitForClaudeReady, and crucially - startup/propulsion nudges (GUPP).
-	// It returns ErrAlreadyRunning if Claude is already running in tmux.
+	// WaitForAgentReady, and crucially - startup/propulsion nudges (GUPP).
+	// It returns ErrAlreadyRunning if the agent is already running in tmux.
 	r := &rig.Rig{
 		Name: rigName,
 		Path: filepath.Join(d.config.TownRoot, rigName),
@@ -417,8 +417,8 @@ func (d *Daemon) ensureRefineryRunning(rigName string) {
 	}
 
 	// Manager.Start() handles: zombie detection, session creation, env vars, theming,
-	// WaitForClaudeReady, and crucially - startup/propulsion nudges (GUPP).
-	// It returns ErrAlreadyRunning if Claude is already running in tmux.
+	// WaitForAgentReady, and crucially - startup/propulsion nudges (GUPP).
+	// It returns ErrAlreadyRunning if the agent is already running in tmux.
 	r := &rig.Rig{
 		Name: rigName,
 		Path: filepath.Join(d.config.TownRoot, rigName),
@@ -498,7 +498,7 @@ func (d *Daemon) isRigOperational(rigName string) (bool, string) {
 }
 
 // triggerPendingSpawns polls pending polecat spawns and triggers those that are ready.
-// This is bootstrap mode - uses regex-based WaitForClaudeReady which is acceptable
+// This is bootstrap mode - uses regex-based WaitForAgentReady which is acceptable
 // for daemon operations when no AI agent is guaranteed to be running.
 // The timeout is short (2s) to avoid blocking the heartbeat.
 func (d *Daemon) triggerPendingSpawns() {
@@ -517,7 +517,7 @@ func (d *Daemon) triggerPendingSpawns() {
 
 	d.logger.Printf("Found %d pending spawn(s), attempting to trigger...", len(pending))
 
-	// Trigger pending spawns (uses WaitForClaudeReady with short timeout)
+	// Trigger pending spawns (uses WaitForAgentReady with short timeout)
 	results, err := polecat.TriggerPendingSpawns(d.config.TownRoot, triggerTimeout)
 	if err != nil {
 		d.logger.Printf("Error triggering spawns: %v", err)
