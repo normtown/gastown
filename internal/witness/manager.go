@@ -193,9 +193,9 @@ func (m *Manager) Start(foreground bool) error {
 		return fmt.Errorf("starting Claude agent: %w", err)
 	}
 
-	// Wait for Claude to start and show its prompt (non-fatal)
-	// WaitForClaudeReady waits for "> " prompt, more reliable than just checking node is running
-	if err := t.WaitForClaudeReady(sessionID, constants.ClaudeStartTimeout); err != nil {
+	// Wait for agent to start and show its prompt (non-fatal)
+	// WaitForAgentReady waits for "> " prompt, more reliable than just checking process is running
+	if err := t.WaitForAgentReady(sessionID, constants.ClaudeStartTimeout); err != nil {
 		// Non-fatal - try to continue anyway
 	}
 
