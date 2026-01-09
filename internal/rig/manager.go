@@ -27,14 +27,22 @@ var (
 
 // RigConfig represents the rig-level configuration (config.json at rig root).
 type RigConfig struct {
-	Type          string       `json:"type"`                     // "rig"
-	Version       int          `json:"version"`                  // schema version
-	Name          string       `json:"name"`                     // rig name
-	GitURL        string       `json:"git_url"`                  // repository URL
-	LocalRepo     string       `json:"local_repo,omitempty"`     // optional local reference repo
-	DefaultBranch string       `json:"default_branch,omitempty"` // main, master, etc.
-	CreatedAt     time.Time    `json:"created_at"`               // when rig was created
-	Beads         *BeadsConfig `json:"beads,omitempty"`
+	Type          string         `json:"type"`                     // "rig"
+	Version       int            `json:"version"`                  // schema version
+	Name          string         `json:"name"`                     // rig name
+	GitURL        string         `json:"git_url"`                  // repository URL
+	LocalRepo     string         `json:"local_repo,omitempty"`     // optional local reference repo
+	DefaultBranch string         `json:"default_branch,omitempty"` // main, master, etc.
+	CreatedAt     time.Time      `json:"created_at"`               // when rig was created
+	Beads         *BeadsConfig   `json:"beads,omitempty"`
+	Adapter       *AdapterConfig `json:"adapter,omitempty"`        // source control adapter config
+}
+
+// AdapterConfig holds source control adapter configuration.
+type AdapterConfig struct {
+	Type       string         `json:"type"`                  // "git", "brazil", etc.
+	WorkerMode string         `json:"worker_mode,omitempty"` // "worktree", "branch", "workspace"
+	Extra      map[string]any `json:"extra,omitempty"`       // adapter-specific config
 }
 
 // BeadsConfig represents beads configuration for the rig.
@@ -164,11 +172,13 @@ func (m *Manager) loadRig(name string, entry config.RigEntry) (*Rig, error) {
 
 // AddRigOptions configures rig creation.
 type AddRigOptions struct {
-	Name          string // Rig name (directory name)
-	GitURL        string // Repository URL
-	BeadsPrefix   string // Beads issue prefix (defaults to derived from name)
-	LocalRepo     string // Optional local repo for reference clones
-	DefaultBranch string // Default branch (defaults to auto-detected from remote)
+	Name          string         // Rig name (directory name)
+	GitURL        string         // Repository URL (for git adapter)
+	BeadsPrefix   string         // Beads issue prefix (defaults to derived from name)
+	LocalRepo     string         // Optional local repo for reference clones
+	DefaultBranch string         // Default branch (defaults to auto-detected from remote)
+	Adapter       string         // Source control adapter ("git", "brazil", etc.)
+	AdapterExtra  map[string]any // Adapter-specific configuration
 }
 
 func resolveLocalRepo(path, gitURL string) (string, string) {
@@ -257,6 +267,12 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		}
 	}()
 
+	// Determine adapter type (default to git)
+	adapterType := opts.Adapter
+	if adapterType == "" {
+		adapterType = "git"
+	}
+
 	// Create rig config
 	rigConfig := &RigConfig{
 		Type:      "rig",
@@ -267,6 +283,10 @@ func (m *Manager) AddRig(opts AddRigOptions) (*Rig, error) {
 		CreatedAt: time.Now(),
 		Beads: &BeadsConfig{
 			Prefix: opts.BeadsPrefix,
+		},
+		Adapter: &AdapterConfig{
+			Type:  adapterType,
+			Extra: opts.AdapterExtra,
 		},
 	}
 	if err := m.saveRigConfig(rigPath, rigConfig); err != nil {

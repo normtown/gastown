@@ -41,9 +41,12 @@ A rig is a container for managing a project and its agents:
 }
 
 var rigAddCmd = &cobra.Command{
-	Use:   "add <name> <git-url>",
+	Use:   "add <name> [git-url]",
 	Short: "Add a new rig to the workspace",
-	Long: `Add a new rig by cloning a repository.
+	Long: `Add a new rig to the workspace.
+
+By default, creates a git-based rig by cloning a repository. Use --adapter
+to specify a different source control system.
 
 This creates a rig container with:
   - config.json           Rig configuration
@@ -60,10 +63,15 @@ The command also:
   - Creates ~/gt/plugins/ (town-level) if it doesn't exist
   - Creates <rig>/plugins/ (rig-level)
 
-Example:
+Examples:
+  # Git adapter (default)
   gt rig add gastown https://github.com/steveyegge/gastown
-  gt rig add my-project git@github.com:user/repo.git --prefix mp`,
-	Args: cobra.ExactArgs(2),
+  gt rig add my-project git@github.com:user/repo.git --prefix mp
+  gt rig add myproject --git-url git@github.com:org/repo.git
+
+  # Brazil adapter
+  gt rig add mypackage --adapter brazil --package PackageA`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: runRigAdd,
 }
 
@@ -256,6 +264,9 @@ var (
 	rigAddPrefix       string
 	rigAddLocalRepo    string
 	rigAddBranch       string
+	rigAddAdapter      string
+	rigAddGitURL       string
+	rigAddPackage      string // Brazil adapter: package name
 	rigResetHandoff    bool
 	rigResetMail       bool
 	rigResetStale      bool
@@ -286,6 +297,9 @@ func init() {
 	rigAddCmd.Flags().StringVar(&rigAddPrefix, "prefix", "", "Beads issue prefix (default: derived from name)")
 	rigAddCmd.Flags().StringVar(&rigAddLocalRepo, "local-repo", "", "Local repo path to share git objects (optional)")
 	rigAddCmd.Flags().StringVar(&rigAddBranch, "branch", "", "Default branch name (default: auto-detected from remote)")
+	rigAddCmd.Flags().StringVar(&rigAddAdapter, "adapter", "git", "Source control adapter (git, brazil)")
+	rigAddCmd.Flags().StringVar(&rigAddGitURL, "git-url", "", "Git repository URL (alternative to positional arg)")
+	rigAddCmd.Flags().StringVar(&rigAddPackage, "package", "", "Brazil package name (required for brazil adapter)")
 
 	rigResetCmd.Flags().BoolVar(&rigResetHandoff, "handoff", false, "Clear handoff content")
 	rigResetCmd.Flags().BoolVar(&rigResetMail, "mail", false, "Clear stale mail messages")
@@ -307,7 +321,34 @@ func init() {
 
 func runRigAdd(cmd *cobra.Command, args []string) error {
 	name := args[0]
-	gitURL := args[1]
+
+	// Determine git URL from positional arg or flag
+	var gitURL string
+	if len(args) >= 2 {
+		gitURL = args[1]
+	} else if rigAddGitURL != "" {
+		gitURL = rigAddGitURL
+	}
+
+	// Build adapter-specific configuration
+	adapterExtra := make(map[string]any)
+	switch rigAddAdapter {
+	case "git":
+		if gitURL == "" {
+			return fmt.Errorf("git adapter requires a git URL (positional arg or --git-url)")
+		}
+		adapterExtra["git_url"] = gitURL
+		if rigAddLocalRepo != "" {
+			adapterExtra["local_repo"] = rigAddLocalRepo
+		}
+	case "brazil":
+		if rigAddPackage == "" {
+			return fmt.Errorf("brazil adapter requires --package flag")
+		}
+		adapterExtra["package"] = rigAddPackage
+	default:
+		return fmt.Errorf("unknown adapter: %s (supported: git, brazil)", rigAddAdapter)
+	}
 
 	// Ensure beads (bd) is available before proceeding
 	if err := deps.EnsureBeads(true); err != nil {
@@ -336,7 +377,13 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 	mgr := rig.NewManager(townRoot, rigsConfig, g)
 
 	fmt.Printf("Creating rig %s...\n", style.Bold.Render(name))
-	fmt.Printf("  Repository: %s\n", gitURL)
+	fmt.Printf("  Adapter: %s\n", rigAddAdapter)
+	if gitURL != "" {
+		fmt.Printf("  Repository: %s\n", gitURL)
+	}
+	if rigAddPackage != "" {
+		fmt.Printf("  Package: %s\n", rigAddPackage)
+	}
 	if rigAddLocalRepo != "" {
 		fmt.Printf("  Local repo: %s\n", rigAddLocalRepo)
 	}
@@ -350,6 +397,8 @@ func runRigAdd(cmd *cobra.Command, args []string) error {
 		BeadsPrefix:   rigAddPrefix,
 		LocalRepo:     rigAddLocalRepo,
 		DefaultBranch: rigAddBranch,
+		Adapter:       rigAddAdapter,
+		AdapterExtra:  adapterExtra,
 	})
 	if err != nil {
 		return fmt.Errorf("adding rig: %w", err)
